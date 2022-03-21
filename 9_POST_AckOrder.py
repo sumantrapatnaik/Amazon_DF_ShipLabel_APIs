@@ -1,0 +1,180 @@
+#Description: This code is am example for generating the AWS Signature V4 and use it to call DF SP API POST Submit Shipping Label
+#CODE REFERENCE: https://docs.aws.amazon.com/general/latest/gr/sigv4-signed-request-examples.html
+#Reference link 1: to install 'requests' library: https://pypi.org/project/requests/
+#Reference Link 2: https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html
+
+import sys,os,datetime,hmac,hashlib
+import requests   #Not a built-in Python library, you need to install it separately
+import json, urllib.parse
+from urllib.parse import quote_plus, quote, urlencode
+
+
+def sign(key,msg):
+    return hmac.new(key, msg.encode('utf-8'), hashlib.sha256).digest()
+
+def getSignatureKey(key, dateStamp, regionName, serviceName):
+    kDate = sign(('AWS4' + key).encode('utf-8'), dateStamp)
+    kRegion = sign(kDate, regionName)
+    kService = sign(kRegion, serviceName)
+    kSigning = sign(kService, 'aws4_request')
+    return kSigning
+
+def uriEncode(param):
+    return urllib.parse.quote(param, safe='')
+
+def generateAuthHeaders(method, service, host, region, f_canonical_uri, f_canonical_querystring, raw_payload, access_key, secret_key, access_token):
+    
+    t = datetime.datetime.utcnow()
+    amzdate = t.strftime('%Y%m%dT%H%M%SZ')
+    datestamp = t.strftime('%Y%m%d')
+    #print('amzdate=',amzdate)
+
+    #******TASK-1 : Create a Canonical Request********
+    if method == 'POST':
+        payload_hash = hashlib.sha256(raw_payload.encode('utf-8')).hexdigest()
+    elif method == 'GET':
+        payload_hash = hashlib.sha256(('').encode('utf-8')).hexdigest()
+
+    #canonical_uri is the URI-encoded version of the absolute path component of the URI—everything starting with the "/" that follows the domain name and up to the end of the string or to the question mark character ('?') if you have query string parameters 
+    canonical_uri = f_canonical_uri 
+
+    #canonical_querystring is the the URI-encoded query string parameters. URI-encode name and values individually. You must also sort the parameters in the canonical query string alphabetically by key name. The sorting occurs after encoding
+    canonical_querystring = f_canonical_querystring  #Even if there are no Query Pararmeters in the URL, an empty string needs to be there in the canonical_request
+
+    canonical_headers = 'host:' + host + '\n' + 'x-amz-access-token:' + access_token + '\n' + 'x-amz-content-sha256:' + payload_hash + '\n' + 'x-amz-date:' + amzdate + '\n'
+
+    signed_headers = 'host;x-amz-access-token;x-amz-content-sha256;x-amz-date'  #Add the headers based on the API call in the same sequence as canonical_headers
+
+    canonical_request = method + '\n' + canonical_uri +'\n'+ canonical_querystring + '\n' + canonical_headers + '\n' + signed_headers + '\n' + payload_hash
+
+    #print("TASK 1 Canonical_request =", canonical_request)
+
+    #******TASK-2 : Create the String to Sign********
+    algorithm = 'AWS4-HMAC-SHA256'
+    credential_scope = datestamp + '/' + region + '/' + service + '/' + 'aws4_request'
+    string_to_sign = algorithm + '\n' + amzdate + '\n' + credential_scope + '\n' + hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()
+
+    #print ('TASK 2 String-to-Sign=',string_to_sign)
+
+    #******TASK-3 : Calculate the Signature**********
+    signing_key = getSignatureKey(secret_key, datestamp, region, service)
+    signature = hmac.new(signing_key, (string_to_sign).encode('utf-8'), hashlib.sha256).hexdigest()
+
+    #print ('TASK 3 Signature =', signature)
+
+    #*******TASK 4 : Add Signing Information to the Request********
+    authorization_header = algorithm + ' ' + 'Credential=' + access_key + '/' + credential_scope + ', ' + 'SignedHeaders=' + signed_headers + ', ' + 'Signature=' + signature
+
+    l_headers = {'Authorization':authorization_header, 'x-amz-access-token':access_token,'x-amz-content-sha256':payload_hash,'x-amz-date':amzdate}
+
+    return l_headers
+
+#BEGIN*************To Generate LWA Access Token****************
+client_id = ""
+client_secret = ""
+grant_type = "refresh_token"
+refresh_token = ""
+
+if client_id == '' or client_secret == '':
+    print('No access keys')
+    sys.exit()
+
+base_url = "https://api.amazon.com/auth/O2/token?{}"
+
+params = {"grant_type":grant_type,"client_id":client_id,"client_secret":client_secret,"refresh_token":refresh_token}
+endpoint = base_url.format(urlencode(params, safe="()", quote_via=quote))
+
+#********SEND the Request******
+request_url = endpoint
+
+print("\nBEGIN REQUEST+++++++++++++++++++++++++++++++++++++")
+print("Request URL = "+ request_url)
+r = requests.post(request_url)
+
+print("\nRESPONSE++++++++++++++++++++++++++++++++++++++++++")
+print('Response Code: %d\n' % r.status_code)
+
+#********TO Pretty-print JSON*********
+json_object = json.loads(r.text)
+json_formatted_str = json.dumps(json_object, indent=2)
+
+print(json_formatted_str)
+
+if r.status_code == 200 and json_formatted_str != "":
+    r_access_token = json_object["access_token"]
+else:
+    r_access_token = ""
+
+#END*************To Generate LWA Access Token****************
+
+#BEGIN***********For calling POST Submit Shipping Label*****************
+
+#AWS Access Key and AWS Secret Access Key from the AWS User needs to be used here
+access_key = ''
+secret_key = ''
+
+method = 'POST'
+service = 'execute-api'
+host = 'sellingpartnerapi-na.amazon.com'
+region = 'us-east-1'
+endpoint = 'https://sellingpartnerapi-na.amazon.com/vendor/directFulfillment/orders/v1/acknowledgements'
+
+#LWA Access Token received in response of the above API call
+access_token = r_access_token
+
+# Payload for Acknowledge Order - Passed in a JSON block.
+raw_payload = '{'
+raw_payload +=	'"orderAcknowledgements": ['
+raw_payload +=		'{'
+raw_payload +=			'"purchaseOrderNumber": "2JK3S9VCD",'
+raw_payload +=			'"vendorOrderNumber": "ABC",'
+raw_payload +=			'"acknowledgementDate": "2020-02-20T19:17:34.304Z",'
+raw_payload +=			'"acknowledgementStatus": {'
+raw_payload +=				'"code": "00",'
+raw_payload +=				'"description": "Shipping 100 percent of ordered product"'
+raw_payload +=			'},'
+raw_payload +=			'"sellingParty": {'
+raw_payload +=				'"partyId": "999US"'
+raw_payload +=			'},'
+raw_payload +=			'"shipFromParty": {'
+raw_payload +=				'"partyId": "ABCD"'
+raw_payload +=			'},'
+raw_payload +=			'"itemAcknowledgements": ['
+raw_payload +=				'{'
+raw_payload +=					'"itemSequenceNumber": "00001",'
+raw_payload +=					'"buyerProductIdentifier": "B07DFVDRAB",'
+raw_payload +=					'"vendorProductIdentifier": "8806098286500",'
+raw_payload +=					'"acknowledgedQuantity": {'
+raw_payload +=						'"amount": 1,'
+raw_payload +=						'"unitOfMeasure": "Each"'
+raw_payload +=					'}'
+raw_payload +=				'}'
+raw_payload +=			']'
+raw_payload +=		'}'
+raw_payload +=	']'
+raw_payload += '}'
+
+#canonical_uri is the URI-encoded version of the absolute path component of the URI—everything starting with the "/" that follows the domain name and up to the end of the string or to the question mark character ('?') if you have query string parameters 
+canonical_uri = "/vendor/directFulfillment/orders/v1/acknowledgements" 
+
+#canonical_querystring is the the URI-encoded query string parameters. URI-encode name and values individually. You must also sort the parameters in the canonical query string alphabetically by key name. The sorting occurs after encoding
+canonical_querystring = "" #Even if there are no Query Pararmeters in the URL, an empty string needs to be there in the canonical_request
+
+headers = generateAuthHeaders(method,service,host,region,canonical_uri,canonical_querystring,raw_payload,access_key,secret_key,access_token)
+
+request_url = endpoint
+
+print("\nBEGIN REQUEST+++++++++++++++++++++++++++++++++++++")
+print("Request URL = "+ request_url)
+r = requests.post(request_url, data=raw_payload, headers=headers)
+
+print("\nRESPONSE++++++++++++++++++++++++++++++++++++++++++")
+print('Response Code: %d\n' % r.status_code)
+
+#********TO Pretty-print JSON*********
+json_object = json.loads(r.text)
+json_formatted_str = json.dumps(json_object, indent=2)
+
+print(json_formatted_str)
+
+#END***********For calling POST Submit Shipping Label*****************
