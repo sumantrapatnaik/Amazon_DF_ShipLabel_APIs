@@ -27,7 +27,6 @@ def generateAuthHeaders(method, service, host, region, f_canonical_uri, f_canoni
     t = datetime.datetime.utcnow()
     amzdate = t.strftime('%Y%m%dT%H%M%SZ')
     datestamp = t.strftime('%Y%m%d')
-    #print('amzdate=',amzdate)
 
     #******TASK-1 : Create a Canonical Request********
     if method == 'POST':
@@ -38,12 +37,14 @@ def generateAuthHeaders(method, service, host, region, f_canonical_uri, f_canoni
     #canonical_uri is the URI-encoded version of the absolute path component of the URI—everything starting with the "/" that follows the domain name and up to the end of the string or to the question mark character ('?') if you have query string parameters 
     canonical_uri = f_canonical_uri 
 
-    #canonical_querystring is the the URI-encoded query string parameters. URI-encode name and values individually. You must also sort the parameters in the canonical query string alphabetically by key name. The sorting occurs after encoding
-    canonical_querystring = f_canonical_querystring  #Even if there are no Query Pararmeters in the URL, an empty string needs to be there in the canonical_request
+    #Canonical_querystring is the the URI-encoded query string parameters. URI-encode name and values individually. You must also sort the parameters in the canonical query string alphabetically by key name. 
+    #The sorting occurs after encoding
+    #Even if there are no Query Pararmeters in the URL, an empty string needs to be there in the canonical_request
+    canonical_querystring = f_canonical_querystring  
 
-    canonical_headers = 'host:' + host + '\n' + 'x-amz-access-token:' + access_token + '\n' + 'x-amz-content-sha256:' + payload_hash + '\n' + 'x-amz-date:' + amzdate + '\n'
-
-    signed_headers = 'host;x-amz-access-token;x-amz-content-sha256;x-amz-date'  #Add the headers based on the API call in the same sequence as canonical_headers
+    #Create the canonical headers and signed headers. Header names must be trimmed and lowercase, and sorted in code point order from low to high. Note that there is a trailing \n.
+    canonical_headers = 'host:' + host + '\n' + 'x-amz-date:' + amzdate + '\n'
+    signed_headers = 'host;x-amz-date'  #Add the headers based on the API call in the same sequence as canonical_headers
 
     canonical_request = method + '\n' + canonical_uri +'\n'+ canonical_querystring + '\n' + canonical_headers + '\n' + signed_headers + '\n' + payload_hash
 
@@ -65,7 +66,11 @@ def generateAuthHeaders(method, service, host, region, f_canonical_uri, f_canoni
     #*******TASK 4 : Add Signing Information to the Request********
     authorization_header = algorithm + ' ' + 'Credential=' + access_key + '/' + credential_scope + ', ' + 'SignedHeaders=' + signed_headers + ', ' + 'Signature=' + signature
 
-    l_headers = {'Authorization':authorization_header, 'x-amz-access-token':access_token,'x-amz-content-sha256':payload_hash,'x-amz-date':amzdate}
+    #These are the Headers that must be there in your HTTP request
+    if method == 'POST':
+        l_headers = {'Authorization':authorization_header, 'x-amz-access-token':access_token,'x-amz-content-sha256':payload_hash,'x-amz-date':amzdate}
+    elif method == 'GET':
+        l_headers = {'Authorization':authorization_header, 'x-amz-access-token':access_token,'x-amz-date':amzdate}
 
     return l_headers
 
